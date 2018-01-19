@@ -1,23 +1,14 @@
 # python library
 import numpy as np
-from numpy.random import *
-from matplotlib import pyplot as plt
-import argparse
-
-# OpenCV
-import cv2
-
-# python scripts
-import path as p
-
-
-import cv2
-import cv2.cv as cv
-import numpy as np
 import colorsys
 from PIL import Image
 import copy
 import argparse
+
+
+# OpenCV
+import cv2
+import cv2.cv as cv
 
 
 def get_dominant_color(image):

@@ -13,13 +13,21 @@ ap.add_argument("-b", "--buffer", type=int, default=64,
 	help="max buffer size")
 args = vars(ap.parse_args())
 
-# define the lower and upper boundaries of the "green"
+# define the lower and upper boundaries of the color
 # ball in the HSV color space, then initialize the
 # list of tracked points
-# greenLower = (0, 50, 50)
-# greenUpper = (20, 255, 255)
-greenLower = (0, 50, 50)
-greenUpper = (10, 255, 255)
+
+# red
+# LowerColor = (0, 50, 50)
+# UpperColor = (10, 255, 255)
+
+# green
+# LowerColor = (54, 50, 50)
+# UpperColor = (74, 255, 255)
+
+# blue
+LowerColor = (80, 50, 50)
+UpperColor = (110, 255, 255)
 
 pts = deque(maxlen=args["buffer"])
 
@@ -54,7 +62,7 @@ while True:
 	# construct a mask for the color "green", then perform
 	# a series of dilations and erosions to remove any small
 	# blobs left in the mask
-	mask = cv2.inRange(hsv, greenLower, greenUpper)
+	mask = cv2.inRange(hsv, LowerColor, UpperColor)
 	mask = cv2.erode(mask, None, iterations=2)
 	mask = cv2.dilate(mask, None, iterations=2)
 	# find contours in the mask and initialize the current

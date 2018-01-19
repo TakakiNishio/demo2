@@ -7,9 +7,6 @@ import argparse
 # OpenCV
 import cv2
 
-# python scripts
-import path as p
-
 
 # load picture data
 def find_object(img):
