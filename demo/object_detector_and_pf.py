@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import cv2
 import cv2.cv as cv
 import numpy as np
@@ -5,72 +6,178 @@ import colorsys
 from PIL import Image
 import copy
 import argparse
+import json
+import collections as cl
 from collections import deque
+
+from color_detection import *
+
 
 class Initializer:
 
-    def clear(self):
-         self.workspace = [0]*4 # top,left,bottom,right
-
     # def __init__(self):
+    #     self.robot_workspace_done = False
+    #     self.goal_box1_done = False
+    #     self.goal_box2_done = False
 
-    #     self.workspace = [0]*4 # top,left,bottom,right
+    def clear(self):
+
+        self.robot_workspace_done = False
+        self.goal_box1_done = False
+        self.goal_box2_done = False
+
+        self.press_A_cnt = 0
+
+        self.robot_workspace = [0]*4 # top,bottom,left,right
+        self.goal_box1 = [0]*4 # top,bottom,left,right
+        self.goal_box2 = [0]*4 # top,bottom,left,right
+
+    def finish_robot_workspace_initialization(self,image):
+        self.robot_workspace_done = True
+
+    def finish_goal_box1_initialization(self):
+        self.goal_box1_done = True
 
     def mouse_event(self, event, x, y, flags, param):
 
         if event == cv2.EVENT_LBUTTONUP:
-            # cv2.circle(frame, (x, y), 10, (0, 0, 255), -1)
             print "left x: " +str(x) + " y: " + str(y)
-            self.workspace[0] = y
-            self.workspace[1] = x
+
+            if not self.robot_workspace_done:
+                self.robot_workspace[0] = y
+                self.robot_workspace[2] = x
+            elif not self.goal_box1_done:
+                self.goal_box1[0] = y
+                self.goal_box1[2] = x
+            else:
+                self.goal_box2[0] = y
+                self.goal_box2[2] = x
 
         elif event == cv2.EVENT_RBUTTONUP:
-            # cv2.circle(frame, (x, y), 10, (255, 0, 0), -1)
             print "right x: " +str(x) + " y: " + str(y)
-            self.workspace[2] = y
-            self.workspace[3] = x
 
-    def draw_circle(self, image):
+            if not self.robot_workspace_done:
+                self.robot_workspace[1] = y
+                self.robot_workspace[3] = x
+            elif not self.goal_box1_done:
+                self.goal_box1[1] = y
+                self.goal_box1[3] = x
+            else:
+                self.goal_box2[1] = y
+                self.goal_box2[3] = x
 
-        cv2.circle(image, (self.workspace[1], self.workspace[0]), 10, (0, 0, 255), -1)
-        cv2.circle(image, (self.workspace[3], self.workspace[2]), 10, (255, 0, 0), -1)
+    def display_initialzation_result(self, image):
 
-    def complete_initialization(self):
-        return self.workspace
+        cv2.circle(image, (self.robot_workspace[2], self.robot_workspace[0]), 10, (0, 0, 255), -1)
+        cv2.circle(image, (self.robot_workspace[3], self.robot_workspace[1]), 10, (255, 0, 0), -1)
+
+        cv2.circle(image, (self.goal_box1[2], self.goal_box1[0]), 10, (0, 0, 255), -1)
+        cv2.circle(image, (self.goal_box1[3], self.goal_box1[1]), 10, (255, 0, 0), -1)
+
+        cv2.circle(image, (self.goal_box2[2], self.goal_box2[0]), 10, (0, 0, 255), -1)
+        cv2.circle(image, (self.goal_box2[3], self.goal_box2[1]), 10, (255, 0, 0), -1)
+
+        if self.robot_workspace_done:
+            cv2.rectangle(image,
+                          (self.robot_workspace[2], self.robot_workspace[0]),
+                          (self.robot_workspace[3], self.robot_workspace[1]),
+                          (255, 100, 100), 3)
+            cv2.putText(image, "robot_workspace",
+                        (self.robot_workspace[2]+20, self.robot_workspace[0]+50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 100, 100), 5)
+
+        if self.goal_box1_done:
+            cv2.rectangle(image,
+                          (self.goal_box1[2], self.goal_box1[0]),
+                          (self.goal_box1[3], self.goal_box1[1]),
+                          (0, 0, 0), 3)
+            cv2.putText(image, "Box1",
+                        (self.goal_box1[2]+20, self.goal_box1[0]+50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
+
+        if self.goal_box2_done:
+            cv2.rectangle(image,
+                          (self.goal_box2[2], self.goal_box2[0]),
+                          (self.goal_box2[3], self.goal_box2[1]),
+                          (0, 0, 0), 3)
+            cv2.putText(image, "Box2",
+                        (self.goal_box2[2]+20, self.goal_box2[0]+50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
 
 
-    # original_image[top1:bottom1, left1:right1]
+
+def find_object(robot_workspace, img):
+
+    img_contour = copy.deepcopy(img)
+
+    #1. crop image
+    # top,bottom,left,right
+    img = img[robot_workspace[0]:robot_workspace[1], robot_workspace[2]:robot_workspace[3]]
+
+    #2. gray image
+    grayed = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    #3. blur image
+    # blur parameter
+    k_size = 11
+    g_blur = cv2.GaussianBlur(grayed,(k_size,k_size),0)
+
+    #4. binary image
+    # binary parameters
+    max_value = 255
+    under_thresh = 95
+
+    _, binary = cv2.threshold(g_blur, under_thresh, max_value, cv2.THRESH_BINARY)
+    binary_inv = cv2.bitwise_not(binary)
+
+    #5. recognize contour and rectangle
+    contour, _ = cv2.findContours(binary_inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # area threshold
+    min_area = 2000
+    max_area = 6000
+
+    object_contour = [cnt for cnt in contour if cv2.contourArea(cnt) < max_area and cv2.contourArea(cnt) > min_area]
+    object_rec_list = []
+
+
+    for i in range(len(object_contour)):
+
+        object_rec = cv2.boundingRect(object_contour[i])
+
+        object_top = object_rec[1] + robot_workspace[0]
+        object_left = object_rec[0] + robot_workspace[2]
+        object_bottom = object_top + object_rec[3]
+        object_right = object_left + object_rec[2]
+
+        cv2.rectangle(img_contour,
+                      (object_left, object_top),
+                      (object_right, object_bottom),
+                      (255, 100, 100), 2)
+
+        object_rec_list.append([object_top, object_bottom, object_left, object_right])
+
+    cv2.imshow("binary", binary)
+    cv2.imshow("objects", img_contour)
+
+    return object_rec_list
 
 
 def get_dominant_color(image):
-    """
-    Find a PIL image's dominant color, returning an (r, g, b) tuple.
-    """
+
     image = image.convert('RGBA')
-    # Shrink the image, so we don't spend too long analysing color
-    # frequencies. We're not interpolating so should be quick.
     image.thumbnail((200, 200))
     max_score = None
     dominant_color = None
 
     for count, (r, g, b, a) in image.getcolors(image.size[0] * image.size[1]):
-        # Skip 100% transparent pixels
         if a == 0:
             continue
-        # Get color saturation, 0-1
         saturation = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)[1]
-        # Calculate luminance - integer YUV conversion from
-        # http://en.wikipedia.org/wiki/YUV
         y = min(abs(r * 2104 + g * 4130 + b * 802 + 4096 + 131072) >> 13, 235)
-        # Rescale luminance from 16-235 to 0-1
         y = (y - 16.0) / (235 - 16)
-        # Ignore the brightest colors
         if y > 0.9:
             continue
-        # Calculate the score, preferring highly saturated colors.
-        # Add 0.1 to the saturation so we don't completely ignore grayscale
-        # colors by multiplying the count by zero, but still give them a low
-        # weight.
         score = (saturation + 0.1) * count
         if score > max_score:
             max_score = score
@@ -79,33 +186,27 @@ def get_dominant_color(image):
     return dominant_color
 
 
-def bgr_to_hsv(bgr_color):
-    hsv = cv2.cvtColor(np.array([[[bgr_color[0], bgr_color[1], bgr_color[2]]]],
-                                dtype=np.uint8), cv2.COLOR_BGR2HSV)[0][0]
-    return (int(hsv[0]), int(hsv[1]), int(hsv[2]))
+def generate_color_range(dominant_hsv, h_range, v_th):
 
+    if dominant_hsv[2] < v_th:
+        # for black color tracking
+        _LOWER_COLOR = np.array([dominant_hsv[0]-10,dominant_hsv[1]-40,dominant_hsv[2]-10])
+        _UPPER_COLOR = np.array([dominant_hsv[0]+10,dominant_hsv[1]+40,dominant_hsv[2]+20])
 
-def hsv_to_bgr(hsv_color):
-    bgr = cv2.cvtColor(np.array([[[hsv_color[0], hsv_color[1], hsv_color[2]]]],
-                                dtype=np.uint8),cv2.COLOR_HSV2BGR)[0][0]
-    return (int(bgr[0]), int(bgr[1]),int(bgr[2]))
-
-
-def generate_color_range(dominant_hsv_0, s_range):
-
-    if dominant_hsv_0 < s_range:
-        # low_s = dominant_hsv1_0
-        low_s = 0
     else:
-        low_s = dominant_hsv_0-s_range
 
-    if dominant_hsv_0+s_range > 179 :
-        high_s = dominant_hsv_0
-    else:
-        high_s = dominant_hsv_0 + s_range
+        if dominant_hsv[0] < h_range:
+            low_h = 0
+        else:
+            low_h = dominant_hsv[0]-h_range
 
-    _LOWER_COLOR = np.array([low_s,80,80])
-    _UPPER_COLOR = np.array([high_s,255,255])
+        if dominant_hsv[0]+h_range > 179 :
+            high_h = dominant_hsv[0]
+        else:
+            high_h = dominant_hsv[0] + h_range
+
+            _LOWER_COLOR = np.array([low_h,80,80])
+            _UPPER_COLOR = np.array([high_h,255,255])
 
     return _LOWER_COLOR, _UPPER_COLOR
 
@@ -124,8 +225,9 @@ class ParticleFilter:
 
     # Need adjustment for tracking object velocity
     def modeling(self):
-        self.Y += np.random.random(self.SAMPLEMAX) * 200 - 100 # 2:1
-        self.X += np.random.random(self.SAMPLEMAX) * 200 - 100
+        self.Y += np.random.random(self.SAMPLEMAX) * 100 - 50 # 2:1
+        self.X += np.random.random(self.SAMPLEMAX) * 100 - 50
+
 
     def normalize(self, weight):
         return weight / np.sum(weight)
@@ -169,29 +271,37 @@ class ParticleFilter:
         return np.sum(self.Y) / float(len(self.Y)), np.sum(self.X) / float(len(self.X))
 
 
+
 if __name__ == '__main__':
 
     # video
     ap = argparse.ArgumentParser()
-    ap.add_argument("-v", "--video", required = True, help = "Path to the video")
-    ap.add_argument("-init","--init", action="store_true")
+    ap.add_argument('--video_file', '-v', type=str, default=False,help='path to video')
+    ap.add_argument('--camera_ID', '-c', type=int, default=0,help='camera ID')
+    ap.add_argument('--init', '-init', action="store_true")
+    ap.add_argument('--display_each_steps', '-d', action="store_true")
     args = vars(ap.parse_args())
-    cap = cv2.VideoCapture(args["video"])
-    particle_N = 200
 
-    print args["init"]
-
-    # camera
-    # cap = cv2.VideoCapture(1)
-    # particle_N = 1000
+    if not args["video_file"] == False:
+        cap = cv2.VideoCapture(args["video_file"])
+    else:
+        cap = cv2.VideoCapture(args["camera_ID"])
 
     ret, frame = cap.read()
     frame = cv2.flip(frame,-1)
     w, h = frame.shape[1::-1]
     image_size = (h, w)
 
+    # 0. robot_workspace initialization
     if args["init"]:
+
+        workspace_info = cl.OrderedDict()
+
+        print "-----------------------"
+        print "Step0 : initialization of the teaching space"
+
         initializer = Initializer()
+        initializer.clear()
         cv2.namedWindow("initialize", cv2.WINDOW_NORMAL)
         cv2.setMouseCallback("initialize", initializer.mouse_event)
         original_frame = copy.deepcopy(frame)
@@ -200,7 +310,7 @@ if __name__ == '__main__':
         while (True):
 
             frame = copy.deepcopy(original_frame)
-            initializer.draw_circle(frame)
+            initializer.display_initialzation_result(frame)
             cv2.imshow("initialize", frame)
 
             key = cv2.waitKey(1) & 0xFF
@@ -209,212 +319,238 @@ if __name__ == '__main__':
                 initializer.clear()
                 print "clear"
 
+            if key == ord("a"):
+
+                if initializer.press_A_cnt == 0:
+                    initializer.robot_workspace_done = True
+                    initializer.press_A_cnt += 1
+                    print "Finished robot_workspace initialization"
+
+                elif initializer.press_A_cnt == 1:
+                    initializer.goal_box1_done = True
+                    initializer.press_A_cnt += 1
+                    print "Finished goal_box1 initialization"
+
+                elif initializer.press_A_cnt == 2:
+                    initializer.goal_box2_done = True
+                    initializer.press_A_cnt += 1
+                    print "Finished goal_box2 initialization"
+
+                else:
+                    print "Initialization Completed. press key Q."
+
             if key == ord("q"):
                 break
 
-        cv2.destroyAllWindows()
-        workspace = initializer.complete_initialization()
-        print workspace
+        if not args["display_each_steps"]:
+            cv2.destroyAllWindows()
 
-    pf1 = ParticleFilter(particle_N, image_size)
-    pf1.initialize()
+        # top,bottom,left,right
+        robot_workspace = initializer.robot_workspace
+        goal_box1 = initializer.goal_box1
+        goal_box2 = initializer.goal_box2
 
-    pf2 = ParticleFilter(particle_N, image_size)
-    pf2.initialize()
+        workspace_info["robot_workspace"] = robot_workspace
+        workspace_info["goal_box1"] = goal_box1
+        workspace_info["goal_box2"] = goal_box2
 
-    trajectory_length = 20
-    object_size = 300
-    trajectory_points1 = deque(maxlen=trajectory_length)
-    trajectory_points2 = deque(maxlen=trajectory_length)
+        fw = open("workspace_info.json","w")
 
-    cv2.namedWindow("detected objects", cv2.WINDOW_NORMAL)
-    cv2.namedWindow("tracking result", cv2.WINDOW_NORMAL)
+        json.dump(workspace_info,fw,indent=4)
+        fw.close
 
+        print "saved json file."
+
+
+    # 1. object detection
+    print "-----------------------"
+    print "Step1 : object detection"
+    print
+
+    if not args["init"]:
+
+        # load initial values of workspace
+        print "Open json file."
+        json_file = open("workspace_info.json", "r")
+        json_data = json.load(json_file)
+        json_file.close
+
+        robot_workspace = json_data["robot_workspace"]
+        goal_box1 = json_data["goal_box1"]
+        goal_box2 = json_data["goal_box2"]
 
     while True:
 
         ret, frame = cap.read()
-        frame = cv2.flip(frame,-1)
 
         if ret == False:
-                break
+            break
 
-        original_image = frame
-        circle_image = copy.deepcopy(original_image)
-        gray_image = cv2.cvtColor(original_image,cv2.COLOR_BGR2GRAY)
-        blur_image = cv2.medianBlur(gray_image,5)
+        frame = cv2.flip(frame,-1)
+        object_rec_list = find_object(robot_workspace, frame)
 
-        circles = cv2.HoughCircles(blur_image,cv.CV_HOUGH_GRADIENT,1,40,
-                                   param1=60,param2=35,minRadius=10,maxRadius=40)
+        key = cv2.waitKey(10) & 0xFF
 
-        if circles is None:
-            continue
+        if key == ord("q"):
+            break
 
-        circles = np.uint16(np.around(circles))
+    print "found objects: " + str(len(object_rec_list))
 
-        for i in circles[0,:]:
-            # draw the outer circle
-            cv2.circle(circle_image,(i[0],i[1]),i[2],(0,255,0),2)
-            # draw the center of the circle
-            cv2.circle(circle_image,(i[0],i[1]),2,(0,0,255),3)
+    if not args["display_each_steps"]:
+        cv2.destroyAllWindows()
 
-        if len(circles[0,:]) != 2:
-            cv2.imshow("detected objects",circle_image)
-            cv2.imshow("tracking result", original_image)
-            if cv2.waitKey(20) & 0xFF == 27:
-                break
-            continue
 
-        cv2.imshow("detected objects",circle_image)
-        cv2.imshow("tracking result", original_image)
+    # 2. get a dominant color of the object
+    print "-----------------------"
+    print "Step2: dominant color recognition"
+    print
 
-        # crop image
-        crop_scale = 2
-        left1 = circles[0][0][0] - circles[0][0][2]/crop_scale
-        right1 = circles[0][0][0] + circles[0][0][2]/crop_scale
+    color_recognition = ColorRecognition()
 
-        top1 = circles[0][0][1] - circles[0][0][2]/crop_scale
-        bottom1 = circles[0][0][1] + circles[0][0][2]/crop_scale
+    object_cnt = 0
+    object_color_bgr_list = []
+    object_color_str_list = []
 
-        cropped_image1 = original_image[top1:bottom1, left1:right1]
+    for object_rec in object_rec_list:
 
-        # crop image
-        left2 = circles[0][1][0] - circles[0][1][2]/crop_scale
-        right2 = circles[0][1][0] + circles[0][1][2]/crop_scale
+        object_cnt += 1
+        object_image  = frame[object_rec[0]:object_rec[1], object_rec[2]:object_rec[3]]
+        object_color_str, object_color_bgr = color_recognition(object_image)
+        object_color_bgr_list.append(object_color_bgr)
+        object_color_str_list.append(object_color_str)
+        print "---> " + object_color_str
+        print
+        cv2.imshow(object_color_str, object_image)
 
-        top2 = circles[0][1][1] - circles[0][1][2]/crop_scale
-        bottom2 = circles[0][1][1] + circles[0][1][2]/crop_scale
+    cv2.waitKey(0)
 
-        cropped_image2 = original_image[top2:bottom2, left2:right2]
+    if not args["display_each_steps"]:
+        cv2.destroyAllWindows()
 
-        # convert the image into PIL image format
-        pil_image1 = Image.fromarray(cv2.cvtColor(cropped_image1, cv2.COLOR_BGR2RGB))
-        pil_image2 = Image.fromarray(cv2.cvtColor(cropped_image2, cv2.COLOR_BGR2RGB))
+    # 3. particle filter
+    print "-----------------------"
+    print "Step3: tracking with particle filter"
+    print
+    print "teaching commands:"
+    print
 
-        # detect the dominant color
-        dominant_bgr1 = get_dominant_color(pil_image1)
-        dominant_bgr2 = get_dominant_color(pil_image2)
+    particle_N = 250
+    trajectory_length = 30
+    object_size = 300
+    h_range = 10
+    v_th = 50
+    box_area_margin = 10
 
-        # convert BGR to HSV
-        dominant_hsv1 = bgr_to_hsv(dominant_bgr1)
-        dominant_hsv2 = bgr_to_hsv(dominant_bgr2)
+    PF_list = []
+    trajectory_points_list = []
+    _LOWER_COLOR_list = []
+    _UPPER_COLOR_list = []
+    low_bgr_list = []
+    high_bgr_list = []
 
-        s_range = 10
-        if dominant_hsv1[0] < s_range:
-            # low_s = dominant_hsv1[0]
-            low_s = 0
-        else:
-            low_s = dominant_hsv1[0]-s_range
+    object_N = len(object_color_bgr_list)
+    teaching_command = [False]*object_N
+    command_recorded_flag = [False]*object_N
 
-        if dominant_hsv1[0]+s_range > 179 :
-            high_s = dominant_hsv1[0]
-        else:
-            high_s = dominant_hsv1[0] + s_range
+    for i in range(object_N):
 
-        _LOWER_COLOR1, _UPPER_COLOR1 = generate_color_range(dominant_hsv1[0], s_range)
-        _LOWER_COLOR2, _UPPER_COLOR2 = generate_color_range(dominant_hsv2[0], s_range)
+        pf = ParticleFilter(particle_N, image_size)
+        pf.initialize()
 
-        low_bgr1 = hsv_to_bgr(_LOWER_COLOR1)
-        high_bgr1 = hsv_to_bgr(_UPPER_COLOR1)
+        PF_list.append(pf)
 
-        low_bgr2 = hsv_to_bgr(_LOWER_COLOR2)
-        high_bgr2 = hsv_to_bgr(_UPPER_COLOR2)
+        trajectory_points_list.append(deque(maxlen=trajectory_length))
 
-        # display doninant color
-        size = 200, 200, 3
-        dominant_color_display = np.zeros(size, dtype=np.uint8)
-        dominant_color_display[:] = dominant_bgr1
+        dominant_hsv = color_recognition.bgr_to_hsv(object_color_bgr_list[i])
+        _LOWER_COLOR, _UPPER_COLOR = generate_color_range(dominant_hsv, h_range, v_th)
+        _LOWER_COLOR_list.append(_LOWER_COLOR)
+        _UPPER_COLOR_list.append(_UPPER_COLOR)
+        low_bgr_list.append(color_recognition.hsv_to_bgr(_LOWER_COLOR))
+        high_bgr_list.append(color_recognition.hsv_to_bgr(_UPPER_COLOR))
 
-        # display modified dominant color
-        low_bgr_display = np.zeros(size, dtype=np.uint8)
-        low_bgr_display[:] = low_bgr1
+    cv2.namedWindow("tracking result", cv2.WINDOW_NORMAL)
 
-        # display modified dominant color
-        high_bgr_display = np.zeros(size, dtype=np.uint8)
-        high_bgr_display[:] = high_bgr1
+    while True:
 
-        # print "dominant bgr"
-        # print dominant_bgr1
-        # print "dominant hsv"
-        # print dominant_hsv1
-        # print
-        # print "lower hsv"
-        # print _LOWER_COLOR1
-        # print "upper hsv"
-        # print _UPPER_COLOR1
-        # print
+        ret, frame = cap.read()
 
-        # cv2.imshow("cropped image", cropped_image1)
-        # cv2.imshow("dominant", dominant_color_display)
-        # cv2.imshow("low", low_bgr_display)
-        # cv2.imshow("high", high_bgr_display)
+        if ret == False:
+            break
 
-        while True:
+        frame = cv2.flip(frame,-1)
+        frame_size = frame.shape
 
-            ret, frame = cap.read()
-            frame = cv2.flip(frame,-1)
+        result_frame = copy.deepcopy(frame)
 
-            if ret == False:
-                break
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-            result_frame = copy.deepcopy(frame)
-
-            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        for i in range(object_N):
 
             # Threshold the HSV image to get only a color
-            mask1 = cv2.inRange(hsv, _LOWER_COLOR1, _UPPER_COLOR1)
-            mask2 = cv2.inRange(hsv, _LOWER_COLOR2, _UPPER_COLOR2)
+            mask = cv2.inRange(hsv, _LOWER_COLOR_list[i], _UPPER_COLOR_list[i])
 
             # Start Tracking
-            y1, x1 = pf1.filtering(mask1)
-            y2, x2 = pf2.filtering(mask2)
+            y, x = PF_list[i].filtering(mask)
 
-            frame_size = frame.shape
-            p_range_x1 = np.max(pf1.X)-np.min(pf1.X)
-            p_range_y1 = np.max(pf1.Y)-np.min(pf1.Y)
-            p_range_x2 = np.max(pf2.X)-np.min(pf2.X)
-            p_range_y2 = np.max(pf2.Y)-np.min(pf2.Y)
+            p_range_x = np.max(PF_list[i].X)-np.min(PF_list[i].X)
+            p_range_y = np.max(PF_list[i].Y)-np.min(PF_list[i].Y)
 
-            for i in range(pf1.SAMPLEMAX):
-                cv2.circle(result_frame, (int(pf1.X[i]), int(pf1.Y[i])), 2, high_bgr1, -1)
+            for j in range(PF_list[i].SAMPLEMAX):
+                cv2.circle(result_frame, (int(PF_list[i].X[j]), int(PF_list[i].Y[j])), 2,
+                           (int(object_color_bgr_list[i][0]),
+                            int(object_color_bgr_list[i][1]),
+                            int(object_color_bgr_list[i][2])), -1)
 
-            for j in range(pf2.SAMPLEMAX):
-                cv2.circle(result_frame, (int(pf2.X[j]), int(pf2.Y[j])), 2, high_bgr2, -1)
+            if p_range_x < object_size and p_range_y < object_size:
 
-            if p_range_x1 < object_size and p_range_y1 < object_size:
+                center = (int(x), int(y))
 
-                center1 = (int(x1), int(y1))
-                cv2.circle(result_frame, center1, 8, (0, 255, 255), -1)
-                trajectory_points1.appendleft(center1)
+                # goal_box1 = [0]*4 # top,bottom,left,right
+                # goal_box2 = [0]*4 # top,bottom,left,right
 
-                for m in range(1, len(trajectory_points1)):
-                    if trajectory_points1[m - 1] is None or trajectory_points1[m] is None:
+                if goal_box1[2] - box_area_margin < center[0] and \
+                   center[0] < goal_box1[3] + box_area_margin and \
+                   goal_box1[0] - box_area_margin < center[1] and \
+                   center[1] < goal_box1[1] + box_area_margin:
+                    if not command_recorded_flag[i]:
+                        command = object_color_str_list[i] + " --> Box1"
+                        teaching_command[i] = command
+                        print command
+                        command_recorded_flag[i] = True
+
+                if goal_box2[2] - box_area_margin < center[0] and \
+                   center[0] < goal_box2[3] + box_area_margin and \
+                   goal_box2[0] - box_area_margin < center[1] and \
+                   center[1] < goal_box2[1] + box_area_margin:
+                    if not command_recorded_flag[i]:
+                        command = object_color_str_list[i] + " --> Box2"
+                        teaching_command[i] = command
+                        print command
+                        command_recorded_flag[i] = True
+
+
+                cv2.circle(result_frame, center, 8, (0, 255, 255), -1)
+                trajectory_points_list[i].appendleft(center)
+
+                for k in range(1, len(trajectory_points_list[i])):
+                    if trajectory_points_list[i][k - 1] is None or trajectory_points_list[i][k] is None:
                         continue
-                    cv2.line(result_frame, trajectory_points1[m-1], trajectory_points1[m],
-                             dominant_bgr1, thickness=3)
+                    cv2.line(result_frame, trajectory_points_list[i][k-1], trajectory_points_list[i][k],
+                             (int(high_bgr_list[i][0]),int(high_bgr_list[i][1]),int(high_bgr_list[i][2])), thickness=3)
             else:
-                trajectory_points1 = deque(maxlen=trajectory_length)
+                trajectory_points_list[i] = deque(maxlen=trajectory_length)
 
+        cv2.imshow("tracking result", result_frame)
 
-            if p_range_x2 < object_size and p_range_y2 < object_size:
+        if cv2.waitKey(10) & 0xFF == 27:
+            break
 
-                center2 = (int(x2), int(y2))
-                cv2.circle(result_frame, center2, 8, (0, 255, 255), -1)
-                trajectory_points2.appendleft(center2)
-
-                for n in range(1, len(trajectory_points2)):
-                    if trajectory_points2[n - 1] is None or trajectory_points2[n] is None:
-                        continue
-                    cv2.line(result_frame, trajectory_points2[n-1], trajectory_points2[n],
-                             dominant_bgr2, thickness=3)
-            else:
-                trajectory_points2 = deque(maxlen=trajectory_length)
-
-
-            cv2.imshow("tracking result", result_frame)
-
-            if cv2.waitKey(20) & 0xFF == 27:
-                break
+    # print teaching_command
+    print
 
     cap.release()
+
+    if args["display_each_steps"]:
+            cv2.waitKey(0)
+
     cv2.destroyAllWindows()
