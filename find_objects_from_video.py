@@ -140,16 +140,16 @@ if __name__ == '__main__':
         print frame.shape
 
         # test1
-        top = 130
-        left = 140
-        bottom = 380
-        right = 480
+        # top = 130
+        # left = 140
+        # bottom = 380
+        # right = 480
 
         # test2
-        # top = 0
-        # left = 130
-        # bottom = 315
-        # right = 630
+        top = 6
+        left = 130
+        bottom = 312
+        right = 566
 
         cropped_frame = frame[top:bottom, left:right]
 
