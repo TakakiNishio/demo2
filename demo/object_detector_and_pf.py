@@ -271,6 +271,17 @@ class ParticleFilter:
         return np.sum(self.Y) / float(len(self.Y)), np.sum(self.X) / float(len(self.X))
 
 
+def send_command(command_list):
+    command_message = []
+    for command in command_list:
+        if command != None:
+            command_message.append(command)
+    print
+    print "confirmed command"
+    print command_message
+
+    return command_message
+
 
 if __name__ == '__main__':
 
@@ -449,8 +460,8 @@ if __name__ == '__main__':
     high_bgr_list = []
 
     object_N = len(object_color_bgr_list)
-    teaching_command = [False]*object_N
-    command_recorded_flag = [False]*object_N
+    command_list = [None]*object_N
+    command = [None]*object_N
 
     for i in range(object_N):
 
@@ -512,41 +523,46 @@ if __name__ == '__main__':
                    center[0] < goal_box1[3] + box_area_margin and \
                    goal_box1[0] - box_area_margin < center[1] and \
                    center[1] < goal_box1[1] + box_area_margin:
-                    if not command_recorded_flag[i]:
-                        command = object_color_str_list[i] + " --> Box1"
-                        teaching_command[i] = command
-                        print command
-                        command_recorded_flag[i] = True
+                    command[i] = object_color_str_list[i] + " --> Box1"
 
                 if goal_box2[2] - box_area_margin < center[0] and \
                    center[0] < goal_box2[3] + box_area_margin and \
                    goal_box2[0] - box_area_margin < center[1] and \
                    center[1] < goal_box2[1] + box_area_margin:
-                    if not command_recorded_flag[i]:
-                        command = object_color_str_list[i] + " --> Box2"
-                        teaching_command[i] = command
-                        print command
-                        command_recorded_flag[i] = True
+                    command[i] = object_color_str_list[i] + " --> Box2"
 
+                # Update command
+                if command_list[i] != command[i] :
+                    command_list[i] = command[i]
+                    print command[i]
 
                 cv2.circle(result_frame, center, 8, (0, 255, 255), -1)
                 trajectory_points_list[i].appendleft(center)
 
                 for k in range(1, len(trajectory_points_list[i])):
-                    if trajectory_points_list[i][k - 1] is None or trajectory_points_list[i][k] is None:
+                    if trajectory_points_list[i][k - 1] is None or \
+                       trajectory_points_list[i][k] is None:
                         continue
-                    cv2.line(result_frame, trajectory_points_list[i][k-1], trajectory_points_list[i][k],
-                             (int(high_bgr_list[i][0]),int(high_bgr_list[i][1]),int(high_bgr_list[i][2])), thickness=3)
+                    cv2.line(result_frame, trajectory_points_list[i][k-1],
+                             trajectory_points_list[i][k],
+                             (int(high_bgr_list[i][0]),int(high_bgr_list[i][1]),
+                              int(high_bgr_list[i][2])), thickness=3)
             else:
                 trajectory_points_list[i] = deque(maxlen=trajectory_length)
 
         cv2.imshow("tracking result", result_frame)
 
-        if cv2.waitKey(10) & 0xFF == 27:
+        key = cv2.waitKey(1) & 0xFF
+
+        if key == ord("q"):
+            send_command(command_list)
+            cv2.waitKey(0)
             break
 
-    # print teaching_command
-    print
+        if key == 27:
+            break
+
+    send_command(command_list)
 
     cap.release()
 
