@@ -32,12 +32,6 @@ class Initializer:
         self.goal_box1 = [0]*4 # top,bottom,left,right
         self.goal_box2 = [0]*4 # top,bottom,left,right
 
-    def finish_robot_workspace_initialization(self,image):
-        self.robot_workspace_done = True
-
-    def finish_goal_box1_initialization(self):
-        self.goal_box1_done = True
-
     def mouse_event(self, event, x, y, flags, param):
 
         if event == cv2.EVENT_LBUTTONUP:

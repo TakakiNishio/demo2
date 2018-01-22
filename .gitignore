@@ -6,4 +6,5 @@ results/
 *.mov
 *.mp4
 *.pyc
+*.json
 *~
